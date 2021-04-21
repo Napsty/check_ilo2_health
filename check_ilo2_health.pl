@@ -4,7 +4,7 @@
 # check_ilo2_health.pl
 # based on check_stuff.pl and locfg.pl
 #
-# Nagios plugin using the Nagios::Plugin module and the
+# Nagios plugin using the Nagios::Plugin or Monitoring::Plugin module and the
 # HP Lights-Out XML PERL Scripting Sample from
 # ftp://ftp.hp.com/pub/softlib2/software1/pubsw-linux/p391992567/v60711/linux-LOsamplescripts3.00.0-2.tgz
 # checks if all sensors are ok, returns warning on high temperatures and
@@ -12,6 +12,7 @@
 #
 # Alexander Greiner-Baer <alexander.greiner-baer@web.de> 2007 - 2021
 # Matthew Stier <Matthew.Stier@us.fujitsu.com> 2011
+# Claudio Kuenzler <ck@claudiokuenzler.com> 2021
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -28,6 +29,9 @@
 #
 #
 # Changelog:
+# 1.66    Wed, 21 Apr 2021 13:00:00 +0200
+#   support both Nagios::Plugin and Monitoring::Plugin modules
+#   add option "-W" for checking server's current power usage (in Watt)
 # 1.65    Sat, 06 Feb 2021 13:00:03 +0100
 #	  new option "--ignorecacheother|-O"
 #	    ignores cache status "Other"
@@ -178,10 +182,10 @@ use strict;
 use warnings;
 use strict 'refs';
 
-use Nagios::Plugin;
 use Sys::Hostname;
 use IO::Socket::SSL;
 use XML::Simple;
+use Data::Dumper;
 
 $Net::SSLeay::slowly = 5;
 
@@ -190,8 +194,32 @@ $VERSION = 1.65;
 
 $PROGNAME = "check_ilo2_health";
 
-# instantiate Nagios::Plugin
-our $p = Nagios::Plugin->new(
+# instantiate Nagios::Plugin or Monitoring::Plugin
+sub load_module {
+    my @names = @_;
+    my $module;
+    for my $name (@names) {
+        my $file = $name;
+        # requires need either a bare word or a file name
+        $file =~ s{::}{/}gsxm;
+        $file .= '.pm';
+        eval {
+            require $file;
+            $name->import();
+            $module = $name;
+		};
+		last if $module;
+    }
+    return $module;
+}
+
+my $plugin_module;
+BEGIN {
+	$plugin_module = load_module( 'Monitoring::Plugin', 'Nagios::Plugin' );
+}
+
+
+our $p = $plugin_module->new(
         usage => "Usage: %s [-H <host>] [ -u|--user=<USERNAME> ]
   [ -p|--password=<PASSWORD> ] [ -f|--inputfile=<filename> ]
   [ -a|--fanredundancy ] [ -c|--checkdrives ] [ -d|--perfdata ]
@@ -200,7 +228,7 @@ our $p = Nagios::Plugin->new(
   [ -i|--ignorelinkdown ] [ -x|--ignorebatterymissing ] [ -s|--sslv3 ]
   [ -t <timeout> ] [ -r <retries> ] [ -g|--getinfos ] [ --sslopts ]
   [ -U|--ignorelinkunknown ] [ -L|--eventlogiLO ] [ -S|--iLOselftest ]
-  [ -O|--ignorecacheother ]
+  [ -O|--ignorecacheother ] [ -W|--powerusage ]
   [ -v|--verbose ] ",
         version => $VERSION,
         blurb => 'This plugin checks the health status on a remote iLO2|3|4|5 device
@@ -371,6 +399,13 @@ $p->add_arg(
   Ignore cache status "Other".},
 );
 
+$p->add_arg(
+  spec => 'powerusage|W',
+  help =>
+  qq{-W, --powerusage
+  Check servers current power usage (in Watt)},
+);
+
 # parse arguments
 $p->getopts;
 
@@ -406,6 +441,7 @@ my $eventlogiLO = defined($p->opts->eventlogiLO) ? 1 : 0;
 my $ignorelinkdown = defined($p->opts->ignorelinkdown) ? 1 : 0;
 my $ignorelinkunknown = defined($p->opts->ignorelinkunknown) ? 1 : 0;
 my $ignorebatterymissing = defined($p->opts->ignorebatterymissing) ? 1 : 0;
+my $optpowerusage = defined($p->opts->powerusage) ? 1 : 0;
 my $getinfos = defined($p->opts->getinfos) ? 1 : 0;
 our %drives;
 our $drive;
@@ -685,6 +721,17 @@ if ( $optpowerredundancy ) {
     $return = "CRITICAL";
     $message .= "Power supply $powerredundancy, ";
   }
+}
+
+if ( $optpowerusage ) {
+  my $powerusage=$xml->{'POWER_SUPPLIES'}[0]->{'POWER_SUPPLY_SUMMARY'}[0]->{'PRESENT_POWER_READING'}[0]->{'VALUE'};
+  my ($powerperf) = $powerusage =~ m/(\d+) [Ww]atts/i;
+  $message .= "Power Usage: $powerusage, ";
+  $p->add_perfdata(
+    label   => "power",
+    value   => $powerperf,
+    uom     => ""
+    );
 }
 
 if ( $optfanredundancy ) {
