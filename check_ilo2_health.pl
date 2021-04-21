@@ -727,11 +727,13 @@ if ( $optpowerusage ) {
   my $powerusage=$xml->{'POWER_SUPPLIES'}[0]->{'POWER_SUPPLY_SUMMARY'}[0]->{'PRESENT_POWER_READING'}[0]->{'VALUE'};
   my ($powerperf) = $powerusage =~ m/(\d+) [Ww]atts/i;
   $message .= "Power Usage: $powerusage, ";
-  $p->add_perfdata(
-    label   => "power",
-    value   => $powerperf,
-    uom     => ""
-    );
+  if ( $perfdata ) {
+    $p->add_perfdata(
+      label   => "power",
+      value   => $powerperf,
+      uom     => ""
+      );
+  }
 }
 
 if ( $optfanredundancy ) {
