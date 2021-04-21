@@ -185,7 +185,6 @@ use strict 'refs';
 use Sys::Hostname;
 use IO::Socket::SSL;
 use XML::Simple;
-use Data::Dumper;
 
 $Net::SSLeay::slowly = 5;
 
